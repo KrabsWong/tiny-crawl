@@ -1,0 +1,151 @@
+"""Main FastAPI application for web crawling service."""
+import logging
+import asyncio
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
+
+from config import settings
+from models import CrawlRequest, CrawlResponse, CrawlErrorResponse, HealthResponse
+from crawler import crawler_service
+
+# Configure logging
+logging.basicConfig(
+    level=settings.log_level,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="Crawl4AI Web Scraping Service",
+    description="HTTP API for web crawling using crawl4ai, returning LLM-ready markdown content",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Log startup information."""
+    logger.info("Starting Crawl4AI Web Scraping Service")
+    logger.info(f"Server running on {settings.host}:{settings.port}")
+    logger.info(f"Crawl timeout: {settings.crawl_timeout}s")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Log shutdown information."""
+    logger.info("Shutting down Crawl4AI Web Scraping Service")
+
+
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    summary="Health Check",
+    description="Check if the service is running"
+)
+async def health_check():
+    """
+    Health check endpoint.
+    
+    Returns:
+        HealthResponse with status "ok"
+    """
+    return HealthResponse(status="ok")
+
+
+@app.post(
+    "/crawl",
+    response_model=CrawlResponse,
+    responses={
+        400: {"model": CrawlErrorResponse, "description": "Invalid URL"},
+        502: {"model": CrawlErrorResponse, "description": "Crawl failed"},
+    },
+    summary="Crawl URL",
+    description="Crawl a web page and return its content as markdown"
+)
+async def crawl_url(request: CrawlRequest):
+    """
+    Crawl a URL and return markdown content.
+    
+    Args:
+        request: CrawlRequest containing the URL to crawl
+        
+    Returns:
+        CrawlResponse with markdown content
+        
+    Raises:
+        HTTPException: For various error conditions
+    """
+    url = str(request.url)
+    logger.info(f"Received crawl request for URL: {url}")
+    
+    try:
+        # Perform the crawl
+        result = await crawler_service.crawl_url(url)
+        
+        # Return successful response
+        response = CrawlResponse(
+            success=True,
+            url=url,
+            markdown=result["markdown"],
+            timestamp=datetime.utcnow()
+        )
+        logger.info(f"Successfully completed crawl for {url}")
+        return response
+        
+    except asyncio.TimeoutError as e:
+        logger.error(f"Timeout error for {url}: {str(e)}")
+        error_response = CrawlErrorResponse(
+            success=False,
+            url=url,
+            error=str(e),
+            timestamp=datetime.utcnow()
+        )
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content=error_response.model_dump()
+        )
+        
+    except Exception as e:
+        logger.error(f"Crawl error for {url}: {str(e)}")
+        error_response = CrawlErrorResponse(
+            success=False,
+            url=url,
+            error=f"Failed to crawl URL: {str(e)}",
+            timestamp=datetime.utcnow()
+        )
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content=error_response.model_dump()
+        )
+
+
+@app.exception_handler(ValidationError)
+async def validation_exception_handler(request, exc):
+    """Handle Pydantic validation errors."""
+    logger.error(f"Validation error: {exc}")
+    error_response = CrawlErrorResponse(
+        success=False,
+        url="",
+        error=f"Invalid request: {str(exc)}",
+        timestamp=datetime.utcnow()
+    )
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content=error_response.model_dump()
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host=settings.host,
+        port=settings.port,
+        log_level=settings.log_level.lower(),
+        reload=False
+    )
