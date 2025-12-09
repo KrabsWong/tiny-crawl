@@ -7,11 +7,29 @@ from pydantic import BaseModel, HttpUrl, Field
 class CrawlRequest(BaseModel):
     """Request model for crawl endpoint."""
     url: HttpUrl = Field(..., description="URL to crawl")
+    include_raw_markdown: bool = Field(
+        default=False, 
+        description="Include full unfiltered markdown in response"
+    )
+    filter_threshold: float = Field(
+        default=0.48, 
+        ge=0.0, 
+        le=1.0, 
+        description="Content filter threshold (lower = more content retained)"
+    )
+    min_word_threshold: int = Field(
+        default=5, 
+        ge=0, 
+        description="Minimum words per content block"
+    )
     
     class Config:
         json_schema_extra = {
             "example": {
-                "url": "https://www.example.com"
+                "url": "https://www.example.com",
+                "include_raw_markdown": False,
+                "filter_threshold": 0.48,
+                "min_word_threshold": 5
             }
         }
 
@@ -20,7 +38,11 @@ class CrawlResponse(BaseModel):
     """Response model for successful crawl."""
     success: bool = Field(default=True, description="Whether the crawl was successful")
     url: str = Field(..., description="The crawled URL")
-    markdown: str = Field(..., description="Extracted markdown content")
+    markdown: str = Field(..., description="Filtered markdown content (core content only)")
+    raw_markdown: Optional[str] = Field(
+        default=None, 
+        description="Full unfiltered markdown (only included if requested)"
+    )
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of the response")
     
     class Config:
@@ -29,6 +51,7 @@ class CrawlResponse(BaseModel):
                 "success": True,
                 "url": "https://www.example.com",
                 "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+                "raw_markdown": None,
                 "timestamp": "2025-12-09T12:00:00Z"
             }
         }

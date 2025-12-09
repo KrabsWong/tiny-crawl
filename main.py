@@ -69,29 +69,38 @@ async def health_check():
 )
 async def crawl_url(request: CrawlRequest):
     """
-    Crawl a URL and return markdown content.
+    Crawl a URL and return filtered markdown content.
     
     Args:
-        request: CrawlRequest containing the URL to crawl
+        request: CrawlRequest containing the URL and optional filter parameters
         
     Returns:
-        CrawlResponse with markdown content
+        CrawlResponse with filtered markdown content
         
     Raises:
         HTTPException: For various error conditions
     """
     url = str(request.url)
-    logger.info(f"Received crawl request for URL: {url}")
+    logger.info(
+        f"Received crawl request for URL: {url}, "
+        f"filter_threshold: {request.filter_threshold}, "
+        f"min_word_threshold: {request.min_word_threshold}"
+    )
     
     try:
-        # Perform the crawl
-        result = await crawler_service.crawl_url(url)
+        # Perform the crawl with filter parameters
+        result = await crawler_service.crawl_url(
+            url,
+            filter_threshold=request.filter_threshold,
+            min_word_threshold=request.min_word_threshold
+        )
         
         # Return successful response
         response = CrawlResponse(
             success=True,
             url=url,
             markdown=result["markdown"],
+            raw_markdown=result["raw_markdown"] if request.include_raw_markdown else None,
             timestamp=datetime.utcnow()
         )
         logger.info(f"Successfully completed crawl for {url}")

@@ -38,7 +38,8 @@ async def test_crawl_endpoint(base_url: str, url: str):
             if data.get('success'):
                 markdown_preview = data.get('markdown', '')[:200]
                 print(f"  Markdown preview: {markdown_preview}...")
-                print(f"  Markdown length: {len(data.get('markdown', ''))} chars")
+                print(f"  Filtered markdown length: {len(data.get('markdown', ''))} chars")
+                print(f"  Raw markdown included: {data.get('raw_markdown') is not None}")
                 print("  ✓ Crawl test passed")
                 return True
             else:
@@ -110,6 +111,66 @@ async def test_concurrent_requests(base_url: str):
             return False
 
 
+async def test_include_raw_markdown(base_url: str):
+    """Test the include_raw_markdown parameter."""
+    print("\nTesting include_raw_markdown parameter...")
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{base_url}/crawl",
+                json={"url": "https://example.com", "include_raw_markdown": True},
+                timeout=60.0
+            )
+            print(f"  Status: {response.status_code}")
+            data = response.json()
+            if data.get('success'):
+                has_raw = data.get('raw_markdown') is not None
+                print(f"  Has raw_markdown: {has_raw}")
+                if has_raw:
+                    print(f"  Filtered length: {len(data.get('markdown', ''))} chars")
+                    print(f"  Raw length: {len(data.get('raw_markdown', ''))} chars")
+                    print("  ✓ include_raw_markdown test passed")
+                    return True
+                else:
+                    print("  ✗ raw_markdown should be included")
+                    return False
+            else:
+                print(f"  Error: {data.get('error')}")
+                return False
+        except Exception as e:
+            print(f"  ✗ include_raw_markdown test failed: {e}")
+            return False
+
+
+async def test_custom_filter_threshold(base_url: str):
+    """Test custom filter_threshold parameter."""
+    print("\nTesting custom filter_threshold parameter...")
+    async with httpx.AsyncClient() as client:
+        try:
+            # Test with low threshold (should retain more content)
+            response = await client.post(
+                f"{base_url}/crawl",
+                json={
+                    "url": "https://example.com",
+                    "filter_threshold": 0.1,
+                    "min_word_threshold": 1
+                },
+                timeout=60.0
+            )
+            print(f"  Status: {response.status_code}")
+            data = response.json()
+            if data.get('success'):
+                print(f"  Markdown length with low threshold: {len(data.get('markdown', ''))} chars")
+                print("  ✓ Custom filter_threshold test passed")
+                return True
+            else:
+                print(f"  Error: {data.get('error')}")
+                return False
+        except Exception as e:
+            print(f"  ✗ Custom filter_threshold test failed: {e}")
+            return False
+
+
 async def run_tests(base_url: str = "http://localhost:8000"):
     """Run all tests."""
     print(f"Starting tests against {base_url}\n")
@@ -131,6 +192,12 @@ async def run_tests(base_url: str = "http://localhost:8000"):
     
     # Test concurrent requests
     results.append(await test_concurrent_requests(base_url))
+    
+    # Test include_raw_markdown parameter
+    results.append(await test_include_raw_markdown(base_url))
+    
+    # Test custom filter_threshold parameter
+    results.append(await test_custom_filter_threshold(base_url))
     
     print("\n" + "=" * 60)
     print(f"\nTest Summary: {sum(results)}/{len(results)} tests passed")
