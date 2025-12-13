@@ -2,6 +2,7 @@
 import logging
 import asyncio
 from datetime import datetime
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -17,28 +18,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle application lifespan events."""
+    # Startup
+    logger.info("Starting Crawl4AI Web Scraping Service")
+    logger.info(f"Server running on {settings.host}:{settings.port}")
+    logger.info(f"Crawl timeout: {settings.crawl_timeout}s")
+    logger.info(f"Max concurrent crawls: {settings.max_concurrent_crawls}, Queue timeout: {settings.queue_timeout}s")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down Crawl4AI Web Scraping Service")
+
+
+# Initialize FastAPI app with lifespan handler
 app = FastAPI(
     title="Crawl4AI Web Scraping Service",
     description="HTTP API for web crawling using crawl4ai, returning LLM-ready markdown content",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Log startup information."""
-    logger.info("Starting Crawl4AI Web Scraping Service")
-    logger.info(f"Server running on {settings.host}:{settings.port}")
-    logger.info(f"Crawl timeout: {settings.crawl_timeout}s")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Log shutdown information."""
-    logger.info("Shutting down Crawl4AI Web Scraping Service")
 
 
 @app.get(
@@ -107,17 +111,34 @@ async def crawl_url(request: CrawlRequest):
         return response
         
     except asyncio.TimeoutError as e:
-        logger.error(f"Timeout error for {url}: {str(e)}")
-        error_response = CrawlErrorResponse(
-            success=False,
-            url=url,
-            error=str(e),
-            timestamp=datetime.utcnow()
-        )
-        return JSONResponse(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            content=error_response.model_dump()
-        )
+        error_msg = str(e)
+        
+        # Distinguish between queue timeout (503) and crawl timeout (502)
+        if "Service too busy" in error_msg:
+            logger.warning(f"Queue timeout for {url}: {error_msg}")
+            error_response = CrawlErrorResponse(
+                success=False,
+                url=url,
+                error=error_msg,
+                timestamp=datetime.utcnow()
+            )
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content=error_response.model_dump(),
+                headers={"Retry-After": "60"}
+            )
+        else:
+            logger.error(f"Crawl timeout for {url}: {error_msg}")
+            error_response = CrawlErrorResponse(
+                success=False,
+                url=url,
+                error=error_msg,
+                timestamp=datetime.utcnow()
+            )
+            return JSONResponse(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                content=error_response.model_dump()
+            )
         
     except Exception as e:
         logger.error(f"Crawl error for {url}: {str(e)}")

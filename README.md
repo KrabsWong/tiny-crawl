@@ -81,7 +81,7 @@ Crawl a web page and return its content as markdown.
 }
 ```
 
-**Error Response** (400/502):
+**Error Response** (400/502/503):
 ```json
 {
   "success": false,
@@ -90,6 +90,12 @@ Crawl a web page and return its content as markdown.
   "timestamp": "2025-12-09T12:00:00Z"
 }
 ```
+
+**Status Codes**:
+- `200` - Success
+- `400` - Invalid URL format
+- `502` - Crawl operation failed or timed out
+- `503` - Service too busy (queue timeout - retry after 60s)
 
 ### GET /health
 
@@ -120,6 +126,8 @@ Configuration is managed through environment variables. Copy `.env.example` to `
 | `BROWSER_HEADLESS` | `true` | Run browser in headless mode |
 | `BROWSER_VERBOSE` | `true` | Enable verbose browser logging |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+| `MAX_CONCURRENT_CRAWLS` | `3` | Maximum concurrent crawl operations (memory management) |
+| `QUEUE_TIMEOUT` | `60` | Timeout for waiting in queue (seconds) |
 
 ## Deployment to Railway.app
 
@@ -268,11 +276,23 @@ Increase the timeout in `.env`:
 CRAWL_TIMEOUT=60
 ```
 
+### "Service too busy" errors (HTTP 503)
+
+When concurrent requests exceed capacity, requests are queued. If queue wait exceeds `QUEUE_TIMEOUT`, you'll receive HTTP 503. Solutions:
+- Implement exponential backoff retry in your client
+- Increase `QUEUE_TIMEOUT` (default: 60s)
+- Increase `MAX_CONCURRENT_CRAWLS` if you have available memory
+- Space out your requests to reduce peak load
+
 ### Memory issues on Railway
 
 Railway free tier has 512MB RAM limit. If you encounter memory issues:
-- Consider upgrading to a paid plan
-- Reduce concurrent requests
+- The service now includes automatic concurrency limiting (default: 3 concurrent crawls)
+- Adjust `MAX_CONCURRENT_CRAWLS` environment variable to tune memory usage
+  - Lower value (1-2) = less memory but slower throughput
+  - Higher value (4-5) = more throughput but needs more memory
+- Increase `QUEUE_TIMEOUT` if seeing "Service too busy" errors (default: 60s)
+- Consider upgrading to a paid plan for more memory
 - Monitor memory usage in Railway dashboard
 
 ### Playwright installation fails

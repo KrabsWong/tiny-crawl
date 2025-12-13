@@ -43,8 +43,25 @@ Railway's default environment works out of the box. To customize:
 3. Add any custom settings:
    - `CRAWL_TIMEOUT=60` (if you want longer timeouts)
    - `LOG_LEVEL=DEBUG` (for more verbose logging)
+   - `MAX_CONCURRENT_CRAWLS=3` (default: 3, tune for memory management)
+   - `QUEUE_TIMEOUT=60` (default: 60s, time requests wait in queue)
    
 **Note**: Railway automatically provides `PORT` - don't set it manually!
+
+#### Memory Management Configuration
+
+The service includes automatic concurrency control to prevent memory overflow:
+
+- **`MAX_CONCURRENT_CRAWLS`** (default: 3)
+  - Limits simultaneous browser instances
+  - Each browser uses ~150-200MB RAM
+  - For 512MB Railway free tier: keep at 2-3
+  - For 8GB Hobby plan: can increase to 5-10
+  
+- **`QUEUE_TIMEOUT`** (default: 60s)
+  - How long requests wait for available slot
+  - Longer = more patient clients, higher success rate
+  - Shorter = faster failure feedback, may need retry logic
 
 ### 5. Monitor Deployment
 
@@ -106,13 +123,46 @@ python test_service.py https://your-app.railway.app
 **Issue**: Service crashes with OOM (Out of Memory)  
 **Solution**:
 - Railway free tier: 512MB RAM
-- Upgrade to Hobby plan ($5/month) for 8GB RAM
+- Service now includes automatic concurrency limiting (default: 3 concurrent crawls)
+- **Tune for your tier**:
+  - Free tier (512MB): Set `MAX_CONCURRENT_CRAWLS=2`
+  - Hobby plan (8GB): Can use `MAX_CONCURRENT_CRAWLS=5` or higher
 - Monitor memory in Railway metrics dashboard
+- Check logs for "Request queued" messages indicating concurrency control is working
+- If seeing "Service too busy" errors, increase `QUEUE_TIMEOUT` or space out requests
+
+**Memory Usage Guidelines**:
+- Base application: ~100-150MB
+- Per browser context: ~150-200MB
+- Formula: Total = Base + (MAX_CONCURRENT_CRAWLS × 200MB)
+- Example: 150MB + (3 × 200MB) = ~750MB peak (fits in 1GB with headroom)
 
 ### Slow First Request
 
 **Issue**: First crawl request takes 30+ seconds  
 **Solution**: This is normal! Chromium browser initialization takes time on cold start. Subsequent requests are much faster due to browser pooling.
+
+### HTTP 503 "Service Too Busy" Errors
+
+**Issue**: Requests return HTTP 503 with "Service too busy, please retry later"  
+**Solution**: This means the concurrency limit is reached and queue timeout exceeded.
+
+**Client-side fixes**:
+1. Implement exponential backoff retry:
+   ```python
+   for retry in range(3):
+       response = requests.post(url, json=data)
+       if response.status_code != 503:
+           break
+       time.sleep(2 ** retry)  # 1s, 2s, 4s
+   ```
+2. Space out requests (don't send all at once)
+3. Check `Retry-After` header in 503 response
+
+**Server-side tuning**:
+1. Increase `QUEUE_TIMEOUT` (default: 60s) to be more patient
+2. Increase `MAX_CONCURRENT_CRAWLS` if you have memory headroom
+3. Monitor Railway memory metrics to ensure safe scaling
 
 ## Monitoring
 
@@ -122,6 +172,56 @@ Monitor your service:
 1. **Metrics**: CPU, Memory, Network usage
 2. **Logs**: Real-time application logs
 3. **Deployments**: History and rollback options
+
+### Memory Monitoring
+
+Watch memory usage to tune concurrency settings:
+
+1. **Railway Metrics Dashboard**:
+   - Check "Memory" graph during peak load
+   - Look for patterns near memory limit
+   - Adjust `MAX_CONCURRENT_CRAWLS` if seeing spikes near limit
+
+2. **Log Analysis**:
+   - Search logs for "Request queued" - indicates queuing is working
+   - Look for "Request acquired slot after Xs" - shows queue wait times
+   - Warning logs "Request timed out in queue" - may need higher `QUEUE_TIMEOUT`
+
+3. **Key Indicators**:
+   - Memory stays under 80% of limit: Good headroom ✓
+   - Frequent queue timeouts: Increase `QUEUE_TIMEOUT` or `MAX_CONCURRENT_CRAWLS`
+   - Memory approaching limit: Decrease `MAX_CONCURRENT_CRAWLS` or upgrade plan
+
+### Load Testing
+
+Test your configuration before production:
+
+```bash
+# Run extended tests including concurrency
+python test_service.py https://your-app.railway.app
+
+# Manual concurrent load test (requires httpx)
+python -c "
+import asyncio
+import httpx
+
+async def load_test():
+    urls = ['https://example.com'] * 10
+    async with httpx.AsyncClient() as client:
+        tasks = [
+            client.post('https://your-app.railway.app/crawl', 
+                       json={'url': url}, timeout=90)
+            for url in urls
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        success = sum(1 for r in results if hasattr(r, 'status_code') and r.status_code == 200)
+        print(f'Success: {success}/10')
+
+asyncio.run(load_test())
+"
+```
+
+Watch Railway memory metrics during the test to validate configuration.
 
 ### Application Logs
 

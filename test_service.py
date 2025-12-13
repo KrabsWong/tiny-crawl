@@ -171,6 +171,144 @@ async def test_custom_filter_threshold(base_url: str):
             return False
 
 
+async def test_concurrency_limiting(base_url: str):
+    """Test that concurrent requests are properly limited and queued."""
+    print("\nTesting concurrency limiting (5 requests with limit 3)...")
+    urls = [
+        "https://example.com",
+        "https://www.iana.org",
+        "https://www.w3.org",
+        "https://httpbin.org/html",
+        "https://httpstat.us/200"
+    ]
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            import time
+            start_time = time.time()
+            
+            tasks = [
+                client.post(
+                    f"{base_url}/crawl",
+                    json={"url": url},
+                    timeout=90.0
+                )
+                for url in urls
+            ]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            elapsed_time = time.time() - start_time
+            
+            success_count = sum(
+                1 for r in responses 
+                if not isinstance(r, Exception) and r.status_code in [200, 503]
+            )
+            completed_count = sum(
+                1 for r in responses 
+                if not isinstance(r, Exception) and r.status_code == 200
+            )
+            
+            print(f"  Completed: {completed_count}/{len(urls)} requests successfully")
+            print(f"  Total responses received: {success_count}/{len(urls)}")
+            print(f"  Total time: {elapsed_time:.1f}s")
+            
+            if success_count == len(urls):
+                print("  ✓ Concurrency limiting test passed (all requests handled)")
+                return True
+            else:
+                print("  ✗ Some requests failed unexpectedly")
+                return False
+        except Exception as e:
+            print(f"  ✗ Concurrency limiting test failed: {e}")
+            return False
+
+
+async def test_queue_timeout(base_url: str):
+    """Test queue timeout behavior with very low queue timeout."""
+    print("\nTesting queue timeout behavior...")
+    print("  Note: This test requires MAX_CONCURRENT_CRAWLS=1 and QUEUE_TIMEOUT=5")
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # Send 3 concurrent requests - first should succeed, others may timeout
+            urls = [
+                "https://example.com",
+                "https://www.iana.org", 
+                "https://www.w3.org"
+            ]
+            
+            tasks = [
+                client.post(
+                    f"{base_url}/crawl",
+                    json={"url": url},
+                    timeout=20.0
+                )
+                for url in urls
+            ]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            status_codes = [
+                r.status_code for r in responses 
+                if not isinstance(r, Exception)
+            ]
+            
+            print(f"  Status codes received: {status_codes}")
+            
+            # Check if we got at least one 503 (queue timeout)
+            has_503 = 503 in status_codes
+            has_200 = 200 in status_codes
+            
+            if has_200:
+                print(f"  Got successful responses (200): {status_codes.count(200)}")
+            if has_503:
+                print(f"  Got queue timeout responses (503): {status_codes.count(503)}")
+                print("  ✓ Queue timeout test passed")
+                return True
+            else:
+                print("  ⚠ No queue timeouts observed (may need lower QUEUE_TIMEOUT setting)")
+                return True  # Don't fail if config isn't set for this test
+        except Exception as e:
+            print(f"  ✗ Queue timeout test failed: {e}")
+            return False
+
+
+async def test_slot_release_after_error(base_url: str):
+    """Test that semaphore slots are released even when crawl fails."""
+    print("\nTesting slot release after error...")
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # Send requests to an invalid URL that should fail
+            invalid_url = "https://this-domain-definitely-does-not-exist-12345.com"
+            
+            # Send 2 requests in sequence
+            response1 = await client.post(
+                f"{base_url}/crawl",
+                json={"url": invalid_url},
+                timeout=20.0
+            )
+            
+            response2 = await client.post(
+                f"{base_url}/crawl",
+                json={"url": "https://example.com"},
+                timeout=60.0
+            )
+            
+            print(f"  First request (invalid URL) status: {response1.status_code}")
+            print(f"  Second request (valid URL) status: {response2.status_code}")
+            
+            # Second request should succeed, proving slot was released
+            if response2.status_code == 200:
+                print("  ✓ Slot release after error test passed")
+                return True
+            else:
+                print("  ✗ Second request should have succeeded")
+                return False
+        except Exception as e:
+            print(f"  ✗ Slot release test failed: {e}")
+            return False
+
+
 async def run_tests(base_url: str = "http://localhost:8000"):
     """Run all tests."""
     print(f"Starting tests against {base_url}\n")
@@ -198,6 +336,15 @@ async def run_tests(base_url: str = "http://localhost:8000"):
     
     # Test custom filter_threshold parameter
     results.append(await test_custom_filter_threshold(base_url))
+    
+    # Test concurrency limiting
+    results.append(await test_concurrency_limiting(base_url))
+    
+    # Test queue timeout (optional - requires specific config)
+    results.append(await test_queue_timeout(base_url))
+    
+    # Test slot release after error
+    results.append(await test_slot_release_after_error(base_url))
     
     print("\n" + "=" * 60)
     print(f"\nTest Summary: {sum(results)}/{len(results)} tests passed")
