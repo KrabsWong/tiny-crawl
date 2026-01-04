@@ -122,12 +122,64 @@ Configuration is managed through environment variables. Copy `.env.example` to `
 |----------|---------|-------------|
 | `HOST` | `0.0.0.0` | Server host |
 | `PORT` | `8000` | Server port |
-| `CRAWL_TIMEOUT` | `30` | Timeout for crawl operations (seconds) |
+| `CRAWL_TIMEOUT` | `60` | Timeout for crawl operations (seconds) |
 | `BROWSER_HEADLESS` | `true` | Run browser in headless mode |
 | `BROWSER_VERBOSE` | `true` | Enable verbose browser logging |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `MAX_CONCURRENT_CRAWLS` | `3` | Maximum concurrent crawl operations (memory management) |
+| `MAX_CONCURRENT_CRAWLS` | `1` | Maximum concurrent crawl operations (memory management) |
 | `QUEUE_TIMEOUT` | `60` | Timeout for waiting in queue (seconds) |
+| `USE_STEALTH` | `true` | Enable stealth mode to bypass bot detection |
+| `BROWSER_TYPE` | `undetected` | Browser type (chromium/firefox/webkit/undetected) |
+| `PROXY_SERVER` | `None` | Optional proxy server URL |
+
+## Anti-Bot Detection
+
+The service includes built-in anti-bot detection capabilities to bypass common protection systems like Cloudflare, Akamai, and custom bot detection.
+
+### Features
+
+- **🕵️ Undetected Browser**: Uses a modified Chrome browser that bypasses most bot detection systems
+- **🕶️ Stealth Mode**: Hides automation indicators and mimics real user behavior
+- **🧩 Proxy Support**: Optional proxy configuration for IP rotation
+- **⏱️ Extended Timeout**: Increased default timeout (60s) to accommodate detection bypass delays
+
+### Configuration
+
+Enable/disable anti-bot features via environment variables:
+
+```bash
+USE_STEALTH=true           # Enable stealth mode (recommended)
+BROWSER_TYPE=undetected    # Use undetected browser (recommended)
+CRAWL_TIMEOUT=60          # Increased timeout for protected sites
+PROXY_SERVER=http://proxy.example.com:8080  # Optional proxy
+```
+
+### When to Use
+
+- ✅ Crawling sites with Cloudflare protection
+- ✅ Accessing sites that block automated requests
+- ✅ Scraping sites with JavaScript-based bot detection
+- ✅ Sites requiring human-like browsing behavior
+
+### Performance Impact
+
+- Slightly slower crawl times (~10-20% overhead)
+- Increased timeout to accommodate detection bypass
+- May require slightly more memory per browser instance (~10-20MB)
+
+### Disabling Anti-Bot Detection
+
+If you don't need anti-bot features or want faster crawling:
+
+```bash
+USE_STEALTH=false
+BROWSER_TYPE=chromium
+CRAWL_TIMEOUT=30
+```
+
+### Legal Notice
+
+⚠️ Use anti-bot features responsibly and only for legitimate purposes. Always respect website terms of service and robots.txt.
 
 ## Deployment to Railway.app
 
@@ -287,10 +339,11 @@ When concurrent requests exceed capacity, requests are queued. If queue wait exc
 ### Memory issues on Railway
 
 Railway free tier has 512MB RAM limit. If you encounter memory issues:
-- The service now includes automatic concurrency limiting (default: 3 concurrent crawls)
+- The service now includes automatic concurrency limiting (default: 1 concurrent crawl)
 - Adjust `MAX_CONCURRENT_CRAWLS` environment variable to tune memory usage
-  - Lower value (1-2) = less memory but slower throughput
-  - Higher value (4-5) = more throughput but needs more memory
+  - Value 1 (default) = minimal memory (~300-400MB) but sequential processing
+  - Value 2-3 = moderate memory (~500-800MB) with better throughput
+  - Higher value (4-5) = more throughput but needs more memory (1GB+)
 - Increase `QUEUE_TIMEOUT` if seeing "Service too busy" errors (default: 60s)
 - Consider upgrading to a paid plan for more memory
 - Monitor memory usage in Railway dashboard

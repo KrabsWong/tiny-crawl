@@ -3,13 +3,13 @@ import logging
 import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from config import settings
 from models import CrawlRequest, CrawlResponse, CrawlErrorResponse, HealthResponse
-from crawler import crawler_service
+from crawler import CrawlerService
 
 # Configure logging
 logging.basicConfig(
@@ -24,14 +24,24 @@ async def lifespan(app: FastAPI):
     """Handle application lifespan events."""
     # Startup
     logger.info("Starting Crawl4AI Web Scraping Service")
-    logger.info(f"Server running on {settings.host}:{settings.port}")
-    logger.info(f"Crawl timeout: {settings.crawl_timeout}s")
-    logger.info(f"Max concurrent crawls: {settings.max_concurrent_crawls}, Queue timeout: {settings.queue_timeout}s")
+    logger.info(
+        f"Server running on {settings.host}:{settings.port}. "
+        f"Crawl timeout: {settings.crawl_timeout}s. "
+        f"Max concurrent crawls: {settings.max_concurrent_crawls}, "
+        f"Queue timeout: {settings.queue_timeout}s."
+    )
+    
+    # Initialize crawler service
+    app.state.crawler_service = CrawlerService()
     
     yield
     
     # Shutdown
     logger.info("Shutting down Crawl4AI Web Scraping Service")
+    # Cleanup if needed
+    if hasattr(app.state, "crawler_service"):
+        # If CrawlerService had a cleanup method, we'd call it here
+        pass
 
 
 # Initialize FastAPI app with lifespan handler
@@ -71,12 +81,13 @@ async def health_check():
     summary="Crawl URL",
     description="Crawl a web page and return its content as markdown"
 )
-async def crawl_url(request: CrawlRequest):
+async def crawl_url(request: CrawlRequest, request_obj: Request):
     """
     Crawl a URL and return filtered markdown content.
     
     Args:
         request: CrawlRequest containing the URL and optional filter parameters
+        request_obj: FastAPI Request object to access app state
         
     Returns:
         CrawlResponse with filtered markdown content
@@ -92,11 +103,15 @@ async def crawl_url(request: CrawlRequest):
     )
     
     try:
+        # Get crawler service from app state
+        crawler_service = request_obj.app.state.crawler_service
+        
         # Perform the crawl with filter parameters
         result = await crawler_service.crawl_url(
             url,
             filter_threshold=request.filter_threshold,
-            min_word_threshold=request.min_word_threshold
+            min_word_threshold=request.min_word_threshold,
+            include_raw=request.include_raw_markdown
         )
         
         # Return successful response
@@ -124,7 +139,7 @@ async def crawl_url(request: CrawlRequest):
             )
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content=error_response.model_dump(),
+                content=error_response.model_dump(mode='json'),
                 headers={"Retry-After": "60"}
             )
         else:
@@ -137,7 +152,7 @@ async def crawl_url(request: CrawlRequest):
             )
             return JSONResponse(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                content=error_response.model_dump()
+                content=error_response.model_dump(mode='json')
             )
         
     except Exception as e:
@@ -150,7 +165,7 @@ async def crawl_url(request: CrawlRequest):
         )
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            content=error_response.model_dump()
+            content=error_response.model_dump(mode='json')
         )
 
 

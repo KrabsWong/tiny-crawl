@@ -15,16 +15,38 @@ class CrawlerService:
     """Service for web crawling using crawl4ai."""
     
     def __init__(self):
-        """Initialize the crawler service."""
-        self.browser_config = BrowserConfig(
-            headless=settings.browser_headless,
-            verbose=settings.browser_verbose,
-        )
+        """Initialize the crawler service with anti-bot detection."""
+        # Build extra arguments for anti-bot detection
+        extra_args = [
+            "--disable-blink-features=AutomationControlled",
+        ]
+        
+        # Add additional args for non-headless mode
+        if not settings.browser_headless:
+            extra_args.append("--start-maximized")
+        
+        # Configure browser with anti-bot detection
+        browser_config_params = {
+            "browser_type": settings.browser_type,
+            "headless": settings.browser_headless,
+            "verbose": settings.browser_verbose,
+            "extra_args": extra_args,
+        }
+        
+        # Add stealth mode if enabled
+        if settings.use_stealth:
+            browser_config_params["enable_stealth"] = True
+        
+        # Add proxy if configured
+        if settings.proxy_server:
+            browser_config_params["proxy"] = settings.proxy_server
+        
+        self.browser_config = BrowserConfig(**browser_config_params)
         self.semaphore = asyncio.Semaphore(settings.max_concurrent_crawls)
+        
         logger.info(
-            f"CrawlerService initialized with headless={settings.browser_headless}, "
-            f"verbose={settings.browser_verbose}, "
-            f"max_concurrent_crawls={settings.max_concurrent_crawls}"
+            f"CrawlerService initialized (browser: {settings.browser_type}, "
+            f"stealth: {settings.use_stealth}, max_concurrent: {settings.max_concurrent_crawls})"
         )
     
     async def crawl_url(
@@ -32,7 +54,8 @@ class CrawlerService:
         url: str, 
         timeout: Optional[int] = None,
         filter_threshold: float = 0.48,
-        min_word_threshold: int = 5
+        min_word_threshold: int = 5,
+        include_raw: bool = False
     ) -> dict:
         """
         Crawl a URL and return filtered markdown content.
@@ -42,9 +65,10 @@ class CrawlerService:
             timeout: Optional timeout in seconds (defaults to settings.crawl_timeout)
             filter_threshold: PruningContentFilter threshold (0.0-1.0, lower = more content)
             min_word_threshold: Minimum words per content block
+            include_raw: Whether to include raw_markdown in response (default: False)
             
         Returns:
-            dict with 'markdown' (filtered) and 'raw_markdown' (full) content
+            dict with 'markdown' (filtered) and optionally 'raw_markdown' (full) content
             
         Raises:
             asyncio.TimeoutError: If the crawl operation or queue wait times out
@@ -97,17 +121,18 @@ class CrawlerService:
                 
                 if result.success:
                     fit_markdown = result.markdown.fit_markdown
-                    raw_markdown = result.markdown.raw_markdown
-                    logger.info(
-                        f"Successfully crawled {url}, "
-                        f"fit_markdown length: {len(fit_markdown)}, "
-                        f"raw_markdown length: {len(raw_markdown)}"
-                    )
-                    return {
+                    logger.info(f"Successfully crawled {url}")
+                    
+                    response = {
                         "markdown": fit_markdown,
-                        "raw_markdown": raw_markdown,
                         "success": True
                     }
+                    
+                    # Only include raw_markdown if explicitly requested
+                    if include_raw:
+                        response["raw_markdown"] = result.markdown.raw_markdown
+                    
+                    return response
                 else:
                     error_msg = result.error_message or "Unknown error"
                     logger.error(f"Crawl failed for {url}: {error_msg}")
@@ -128,5 +153,4 @@ class CrawlerService:
             logger.debug(f"Released crawl slot for URL: {url}")
 
 
-# Global crawler service instance
-crawler_service = CrawlerService()
+
