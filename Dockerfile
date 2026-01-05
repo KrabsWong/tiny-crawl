@@ -45,11 +45,11 @@ COPY --chown=user:user requirements.txt .
 
 # 切换到非 root 用户执行后续操作
 USER user
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 6. 安装 Crawl4AI 专有组件和 Playwright 浏览器
 # 注意：在 HF 上，浏览器默认安装在 /home/user/.cache/ms-playwright
-RUN python3 -m crawl4ai.setup_command
+RUN crawl4ai-setup
 RUN python3 -m playwright install --with-deps chromium
 
 # 7. 复制项目代码
