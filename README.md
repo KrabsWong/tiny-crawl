@@ -1,3 +1,12 @@
+---
+title: Tiny Crawl
+emoji: 🦀
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # Tiny Crawl - Web Scraping Service
 
 A simple HTTP API for web crawling that returns LLM-ready markdown content, powered by [crawl4ai](https://github.com/unclecode/crawl4ai).
