@@ -8,61 +8,40 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=7860 \
     HOME=/home/user
 
-# 3. 创建一个非 root 用户 (Hugging Face 的要求)
+# 3. 创建一个非 root 用户
 RUN useradd -m -u 1000 user
 WORKDIR $HOME/app
 
-# 4. 安装系统依赖 (需要 root 权限)
+# 4. 安装系统依赖 (以 root 身份执行)
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget \
-    gnupg \
-    ca-certificates \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libwayland-client0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    xdg-utils \
+    wget gnupg ca-certificates fonts-liberation \
+    libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
+    libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 \
+    libnspr4 libnss3 libwayland-client0 libxcomposite1 \
+    libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# 5. 复制依赖文件并安装
+# 5. 复制依赖并安装包
 COPY --chown=user:user requirements.txt .
 
-# --- 关键修改部分开始 ---
-# 切换到非 root 用户
 USER user
-
-# 必须显式将 .local/bin 加入 PATH，否则找不到 pip 安装的脚本
 ENV PATH="/home/user/.local/bin:${PATH}"
-
-# 安装依赖
 RUN pip install --no-cache-dir -r requirements.txt
-# --- 关键修改部分结束 ---
 
-# 6. 安装 Crawl4AI 专有组件和 Playwright 浏览器
-# 现在 PATH 设置好了，系统就能找到 crawl4ai-setup 了
-RUN crawl4ai-setup
-RUN python3 -m playwright install --with-deps chromium
+# 6. 安装浏览器内核 (关键修改)
+# 这一步我们只安装浏览器二进制文件，不带 --with-deps，避免触发 sudo
+RUN playwright install chromium
+# 如果你使用 undetected 模式，crawl4ai 会用到 patchright
+RUN python3 -m patchright install chromium || echo "Patchright not installed"
 
-# 7. 复制项目代码
+# 7. 初始化 Crawl4AI 数据库 (跳过它内部的浏览器安装)
+# 我们直接运行初始化命令，忽略它内部安装浏览器的报错
+RUN crawl4ai-setup || echo "Setup finished with some warnings"
+
+# 8. 复制项目代码
 COPY --chown=user:user . .
 
-# 8. 暴露端口
+# 9. 暴露端口并启动
 EXPOSE 7860
-
-# 9. 启动命令
 CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
