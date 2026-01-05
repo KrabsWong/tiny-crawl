@@ -16,4 +16,4 @@ jobs:
       - name: Push to huggingface spaces
         env:
           HF_SYNC_TOKEN: ${{ secrets.HF_SYNC_TOKEN }}
-        run: git push --force https://yiiiiiha:$HF_TOKEN@huggingface.co/spaces/yiiiiiha/tiny-crawl main
+        run: git push --force https://yiiiiiha:$HF_SYNC_TOKEN@huggingface.co/spaces/yiiiiiha/tiny-crawl main
