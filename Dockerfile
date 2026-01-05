@@ -13,7 +13,6 @@ RUN useradd -m -u 1000 user
 WORKDIR $HOME/app
 
 # 4. 安装系统依赖 (需要 root 权限)
-# 这些是 Playwright 运行 Chromium 所必须的系统库
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
@@ -43,12 +42,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 5. 复制依赖文件并安装
 COPY --chown=user:user requirements.txt .
 
-# 切换到非 root 用户执行后续操作
+# --- 关键修改部分开始 ---
+# 切换到非 root 用户
 USER user
+
+# 必须显式将 .local/bin 加入 PATH，否则找不到 pip 安装的脚本
+ENV PATH="/home/user/.local/bin:${PATH}"
+
+# 安装依赖
 RUN pip install --no-cache-dir -r requirements.txt
+# --- 关键修改部分结束 ---
 
 # 6. 安装 Crawl4AI 专有组件和 Playwright 浏览器
-# 注意：在 HF 上，浏览器默认安装在 /home/user/.cache/ms-playwright
+# 现在 PATH 设置好了，系统就能找到 crawl4ai-setup 了
 RUN crawl4ai-setup
 RUN python3 -m playwright install --with-deps chromium
 
@@ -59,5 +65,4 @@ COPY --chown=user:user . .
 EXPOSE 7860
 
 # 9. 启动命令
-# 使用 host 0.0.0.0 和端口 7860 才能在 HF 上访问
 CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
